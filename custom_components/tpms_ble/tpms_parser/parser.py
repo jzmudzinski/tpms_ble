@@ -31,6 +31,33 @@ class TPMSBinarySensor(StrEnum):
 
 class TPMSBluetoothDeviceData(BluetoothData):
     """Data for TPMS BLE sensors."""
+    
+    def supported(self, service_info) -> bool:
+        """Check if device is a supported TPMS sensor."""
+        manufacturer_data = service_info.manufacturer_data
+        service_uuids = service_info.service_uuids
+        
+        # TomTom TPMS with FBB0 service UUID and manufacturer ID 256
+        if "0000fbb0-0000-1000-8000-00805f9b34fb" in service_uuids:
+            if manufacturer_data and 256 in manufacturer_data:
+                _LOGGER.debug("TomTom TPMS detected by FBB0 service UUID + manufacturer 256: %s", service_info.address)
+                return True
+                
+        # Type B (service UUID based)
+        if "000027a5-0000-1000-8000-00805f9b34fb" in service_uuids:
+            _LOGGER.debug("TPMS Type B detected by service UUID: %s", service_info.address)
+            return True
+            
+        # Type A (manufacturer ID 256 based, without FBB0)
+        if manufacturer_data and 256 in manufacturer_data:
+            _LOGGER.debug("TPMS Type A detected by manufacturer ID 256: %s", service_info.address)
+            return True
+        
+        _LOGGER.debug("Device not recognized as supported TPMS: %s (name: %s, manufacturer_data: %s, service_uuids: %s)", 
+                     service_info.address, service_info.name, 
+                     list(manufacturer_data.keys()) if manufacturer_data else "None",
+                     list(service_uuids))
+        return False
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
@@ -46,12 +73,11 @@ class TPMSBluetoothDeviceData(BluetoothData):
 
         if "000027a5-0000-1000-8000-00805f9b34fb" in service_info.service_uuids:
             self._process_tpms_b(address, local_name, mfr_data, company_id)
-        elif "0000fbb0-0000-1000-8000-00805f9b34fb" in service_info.service_uuids:
-            self._process_tpms_c(address, local_name, mfr_data, company_id)
+        elif company_id == 256 and "0000fbb0-0000-1000-8000-00805f9b34fb" in service_info.service_uuids:
+            # TomTom TPMS with FBB0 service UUID and manufacturer ID 256 (0x0100)
+            self._process_tpms_tomtom(address, local_name, mfr_data, company_id)
         elif company_id == 256:
             self._process_tpms_a(address, local_name, mfr_data)
-        elif company_id in [384, 385, 386, 387]:  # 0x000180-0x000183
-            self._process_tpms_c(address, local_name, mfr_data, company_id)
         else:
             _LOGGER.error("Can't find the correct data type for company_id %s, service_uuids: %s", 
                          company_id, service_info.service_uuids)
@@ -97,46 +123,58 @@ class TPMSBluetoothDeviceData(BluetoothData):
         battery = int(round(max(0, min(100, battery)), 0))
         self._update_sensors(address, pressure, battery, temperature, None)
 
-    def _process_tpms_c(self, address: str, local_name: str, data: bytes, company_id: int) -> None:
-        """Parser for TPMS sensors with FBB0 service UUID and manufacturer_id 384-387."""
-        _LOGGER.debug("Parsing TPMS TypeC sensor: (%s) %s", company_id, data)
+    def _process_tpms_tomtom(self, address: str, local_name: str, data: bytes, company_id: int) -> None:
+        """Parser for TomTom TPMS sensors with FBB0 service UUID and manufacturer_id 256 (0x0100).
+        
+        Data format (18 bytes):
+        bytes 0-1:   0100 Manufacturer (TomTom)
+        byte 2:      XX   Sensor Number (80:1, 81:2, 82:3, 83:4, ...)
+        bytes 3-4:   EACA Address Prefix
+        bytes 5-7:   XXXXXX Sensor Address
+        bytes 8-11:  XXXXXXXX Pressure (kPa, little-endian)
+        bytes 12-15: XXXXXXXX Temperature (Celsius, little-endian)
+        byte 16:     XX Battery Percentage
+        byte 17:     XX Alarm Flag (00: OK, 01: No Pressure)
+        """
+        _LOGGER.debug("Parsing TomTom TPMS sensor: %s", data.hex())
         msg_length = len(data)
         if msg_length != 18:
-            _LOGGER.error("Can't parse the data because the data length should be 18, got %d", msg_length)
+            _LOGGER.error("TomTom TPMS data length should be 18, got %d", msg_length)
             return
             
-        # Based on the hex data from screenshot, try to parse the structure
-        # Example: 0x000180eaca132cf55eee05006f06000005e00
-        # This is speculation and might need adjustment based on actual data structure
         try:
-            # Skip first 6 bytes (manufacturer header), then parse sensor data
-            sensor_data = data[6:18]
+            # Extract sensor number for identification
+            sensor_number = data[2]
+            sensor_id = sensor_number - 0x80 + 1  # 0x80=1, 0x81=2, etc.
             
-            # Try different parsing approaches - this might need adjustment
-            # Approach 1: Similar to Type A but different structure
-            if len(sensor_data) >= 10:
-                # Extract pressure and temperature (positions might need adjustment)
-                pressure_raw = int.from_bytes(sensor_data[6:10], byteorder='little', signed=False)
-                temp_raw = int.from_bytes(sensor_data[4:6], byteorder='little', signed=True)
-                
-                pressure = pressure_raw / 100000  # Convert to bar
-                temperature = temp_raw / 100      # Convert to Celsius
-                
-                # Battery estimation (this might need adjustment)
-                battery_raw = sensor_data[10] if len(sensor_data) > 10 else 50
-                battery = min(100, max(0, battery_raw))
-                
-                _LOGGER.info("TPMS TypeC parsed: pressure=%.3f bar, temp=%.1f°C, battery=%d%%, company_id=%s", 
-                           pressure, temperature, battery, company_id)
-                
-                self._update_sensors(address, pressure, battery, temperature, None)
-            else:
-                _LOGGER.error("Insufficient sensor data length: %d", len(sensor_data))
-                
+            # Extract sensor address (bytes 5-7)
+            sensor_addr = data[5:8].hex().upper()
+            
+            # Extract pressure (bytes 8-9, BIG-endian, in kPa/100)
+            pressure_raw = int.from_bytes(data[8:10], byteorder='big', signed=False)
+            pressure_kpa = pressure_raw / 100  # Convert to kPa
+            pressure_bar = pressure_kpa / 100  # kPa to bar
+            
+            # Extract temperature (bytes 12-13, LITTLE-endian, in Celsius/100)
+            temp_raw = int.from_bytes(data[12:14], byteorder='little', signed=False)
+            temperature = temp_raw / 100  # Convert to Celsius
+            
+            # Extract battery (byte 16)
+            battery = data[16] if data[16] <= 100 else 100
+            
+            # Extract alarm flag (byte 17)
+            alarm_flag = data[17]
+            alarm = alarm_flag != 0
+            
+            _LOGGER.info("TomTom TPMS parsed - Sensor %d (%s): pressure=%.2f bar (%.0f kPa), temp=%.1f°C, battery=%d%%, alarm=%s", 
+                        sensor_id, sensor_addr, pressure_bar, pressure_kpa, temperature, battery, alarm)
+            
+            self._update_sensors(address, pressure_bar, battery, temperature, alarm)
+            
         except Exception as e:
-            _LOGGER.error("Error parsing TPMS TypeC data: %s, data: %s", e, data.hex())
-            # Fallback: create sensors with default values to at least show the device
-            self._update_sensors(address, 0.0, 0, 0, None)
+            _LOGGER.error("Error parsing TomTom TPMS data: %s, data: %s", e, data.hex())
+            # Fallback: create sensors with zero values to show device exists
+            self._update_sensors(address, 0.0, 0, 0, False)
 
     def _update_sensors(self, address, pressure, battery, temperature, alarm):
         name = f"TPMS {short_address(address)}"

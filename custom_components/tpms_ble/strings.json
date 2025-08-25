@@ -3,9 +3,11 @@
     "flow_title": "[%key:component::bluetooth::config::flow_title%]",
     "step": {
       "user": {
-        "description": "[%key:component::bluetooth::config::step::user::description%]",
+        "title": "Select TPMS Device",
+        "description": "Select a discovered TPMS device or manually enter MAC address (format: {manual_mac_example})",
         "data": {
-          "address": "[%key:component::bluetooth::config::step::user::data::address%]"
+          "address": "Discovered Device",
+          "mac": "Manual MAC Address"
         }
       },
       "bluetooth_confirm": {
@@ -14,9 +16,11 @@
     },
     "abort": {
       "not_supported": "Device not supported",
-      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
+      "no_devices_found": "No devices found. You can manually add device using MAC address.",
       "already_in_progress": "[%key:common::config_flow::abort::already_in_progress%]",
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "invalid_input": "Invalid input provided",
+      "invalid_mac_format": "Invalid MAC address format. Use AA:BB:CC:DD:EE:FF format."
     }
   }
 }

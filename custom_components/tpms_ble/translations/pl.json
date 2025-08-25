@@ -3,8 +3,10 @@
         "abort": {
             "already_configured": "Urządzenie zostało już skonfigurowane",
             "already_in_progress": "Konfiguracja w toku",
-            "no_devices_found": "Nie znaleziono żadnego urządzenia",
-            "not_supported": "Urządzenie nieobsługiwane"
+            "no_devices_found": "Nie znaleziono żadnego urządzenia. Możesz ręcznie dodać urządzenie używając adresu MAC.",
+            "not_supported": "Urządzenie nieobsługiwane",
+            "invalid_input": "Podano nieprawidłowe dane",
+            "invalid_mac_format": "Nieprawidłowy format adresu MAC. Użyj formatu AA:BB:CC:DD:EE:FF."
         },
         "flow_title": "{name}",
         "step": {
@@ -12,10 +14,12 @@
                 "description": "Czy chcesz skonfigurować {name}?"
             },
             "user": {
+                "title": "Wybierz czujnik TPMS",
+                "description": "Wybierz wykryty czujnik TPMS lub ręcznie wprowadź adres MAC (format: {manual_mac_example})",
                 "data": {
-                    "address": "Urządzenie"
-                },
-                "description": "Wybierz urządzenie które chcesz skonfigurować"
+                    "address": "Wykryte urządzenie",
+                    "mac": "Ręczny adres MAC"
+                }
             }
         }
     }
