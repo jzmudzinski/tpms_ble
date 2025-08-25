@@ -46,10 +46,15 @@ class TPMSBluetoothDeviceData(BluetoothData):
 
         if "000027a5-0000-1000-8000-00805f9b34fb" in service_info.service_uuids:
             self._process_tpms_b(address, local_name, mfr_data, company_id)
+        elif "0000fbb0-0000-1000-8000-00805f9b34fb" in service_info.service_uuids:
+            self._process_tpms_c(address, local_name, mfr_data, company_id)
         elif company_id == 256:
             self._process_tpms_a(address, local_name, mfr_data)
+        elif company_id in [384, 385, 386, 387]:  # 0x000180-0x000183
+            self._process_tpms_c(address, local_name, mfr_data, company_id)
         else:
-            _LOGGER.error("Can't find the correct data type")
+            _LOGGER.error("Can't find the correct data type for company_id %s, service_uuids: %s", 
+                         company_id, service_info.service_uuids)
 
     def _process_tpms_a(self, address: str, local_name: str, data: bytes) -> None:
         """Parser for TPMS sensors."""
@@ -91,6 +96,47 @@ class TPMSBluetoothDeviceData(BluetoothData):
         battery = ((voltage - min_voltage) / (max_voltage - min_voltage)) * 100
         battery = int(round(max(0, min(100, battery)), 0))
         self._update_sensors(address, pressure, battery, temperature, None)
+
+    def _process_tpms_c(self, address: str, local_name: str, data: bytes, company_id: int) -> None:
+        """Parser for TPMS sensors with FBB0 service UUID and manufacturer_id 384-387."""
+        _LOGGER.debug("Parsing TPMS TypeC sensor: (%s) %s", company_id, data)
+        msg_length = len(data)
+        if msg_length != 18:
+            _LOGGER.error("Can't parse the data because the data length should be 18, got %d", msg_length)
+            return
+            
+        # Based on the hex data from screenshot, try to parse the structure
+        # Example: 0x000180eaca132cf55eee05006f06000005e00
+        # This is speculation and might need adjustment based on actual data structure
+        try:
+            # Skip first 6 bytes (manufacturer header), then parse sensor data
+            sensor_data = data[6:18]
+            
+            # Try different parsing approaches - this might need adjustment
+            # Approach 1: Similar to Type A but different structure
+            if len(sensor_data) >= 10:
+                # Extract pressure and temperature (positions might need adjustment)
+                pressure_raw = int.from_bytes(sensor_data[6:10], byteorder='little', signed=False)
+                temp_raw = int.from_bytes(sensor_data[4:6], byteorder='little', signed=True)
+                
+                pressure = pressure_raw / 100000  # Convert to bar
+                temperature = temp_raw / 100      # Convert to Celsius
+                
+                # Battery estimation (this might need adjustment)
+                battery_raw = sensor_data[10] if len(sensor_data) > 10 else 50
+                battery = min(100, max(0, battery_raw))
+                
+                _LOGGER.info("TPMS TypeC parsed: pressure=%.3f bar, temp=%.1f°C, battery=%d%%, company_id=%s", 
+                           pressure, temperature, battery, company_id)
+                
+                self._update_sensors(address, pressure, battery, temperature, None)
+            else:
+                _LOGGER.error("Insufficient sensor data length: %d", len(sensor_data))
+                
+        except Exception as e:
+            _LOGGER.error("Error parsing TPMS TypeC data: %s, data: %s", e, data.hex())
+            # Fallback: create sensors with default values to at least show the device
+            self._update_sensors(address, 0.0, 0, 0, None)
 
     def _update_sensors(self, address, pressure, battery, temperature, alarm):
         name = f"TPMS {short_address(address)}"

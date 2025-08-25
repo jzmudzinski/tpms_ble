@@ -7,6 +7,21 @@
     },
     {
       "service_uuid": "000027a5-0000-1000-8000-00805f9b34fb"
+    },
+    {
+      "manufacturer_id": 384
+    },
+    {
+      "manufacturer_id": 385
+    },
+    {
+      "manufacturer_id": 386
+    },
+    {
+      "manufacturer_id": 387
+    },
+    {
+      "service_uuid": "0000fbb0-0000-1000-8000-00805f9b34fb"
     }
   ],
   "codeowners": ["@bkbilly"],
@@ -16,5 +31,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/bkbilly/tpms_ble/issues",
   "requirements": [],
-  "version": "0.2"
+  "version": "0.4"
 }
