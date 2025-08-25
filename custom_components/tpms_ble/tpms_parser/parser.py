@@ -150,10 +150,30 @@ class TPMSBluetoothDeviceData(BluetoothData):
             # Extract sensor address (bytes 5-7)
             sensor_addr = data[5:8].hex().upper()
             
-            # Extract pressure (bytes 8-9, BIG-endian, in kPa/100)
-            pressure_raw = int.from_bytes(data[8:10], byteorder='big', signed=False)
-            pressure_kpa = pressure_raw / 100  # Convert to kPa
-            pressure_bar = pressure_kpa / 100  # kPa to bar
+            # Extract pressure (bytes 8-9) - auto-detect endian format
+            pressure_big = int.from_bytes(data[8:10], byteorder='big', signed=False)
+            pressure_little = int.from_bytes(data[8:10], byteorder='little', signed=False)
+            
+            # Heuristic: choose endian format that gives realistic pressure (1.5-7.0 bar)
+            pressure_bar_big = (pressure_big / 100) / 100  # kPa to bar
+            pressure_bar_little = (pressure_little / 100) / 100  # kPa to bar
+            
+            if 1.5 <= pressure_bar_big <= 7.0:
+                pressure_raw = pressure_big
+                pressure_kpa = pressure_raw / 100
+                pressure_bar = pressure_bar_big
+                endian_used = "big"
+            elif 1.5 <= pressure_bar_little <= 7.0:
+                pressure_raw = pressure_little
+                pressure_kpa = pressure_raw / 100
+                pressure_bar = pressure_bar_little
+                endian_used = "little"
+            else:
+                # Fallback to big-endian if both are out of range
+                pressure_raw = pressure_big
+                pressure_kpa = pressure_raw / 100
+                pressure_bar = pressure_bar_big
+                endian_used = "big (fallback)"
             
             # Extract temperature (bytes 12-13, LITTLE-endian, in Celsius/100)
             temp_raw = int.from_bytes(data[12:14], byteorder='little', signed=False)
@@ -166,8 +186,8 @@ class TPMSBluetoothDeviceData(BluetoothData):
             alarm_flag = data[17]
             alarm = alarm_flag != 0
             
-            _LOGGER.info("TomTom TPMS parsed - Sensor %d (%s): pressure=%.2f bar (%.0f kPa), temp=%.1f°C, battery=%d%%, alarm=%s", 
-                        sensor_id, sensor_addr, pressure_bar, pressure_kpa, temperature, battery, alarm)
+            _LOGGER.info("TomTom TPMS parsed - Sensor %d (%s): pressure=%.2f bar (%.0f kPa), temp=%.1f°C, battery=%d%%, alarm=%s [pressure: %s-endian]", 
+                        sensor_id, sensor_addr, pressure_bar, pressure_kpa, temperature, battery, alarm, endian_used)
             
             self._update_sensors(address, pressure_bar, battery, temperature, alarm)
             
