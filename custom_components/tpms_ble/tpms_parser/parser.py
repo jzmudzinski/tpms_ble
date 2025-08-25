@@ -154,10 +154,12 @@ class TPMSBluetoothDeviceData(BluetoothData):
             # First try known optimal configurations for specific sensor positions
             sensor_id = sensor_number - 0x80 + 1
             known_configs = [
-                # Sensor 1: bytes 9-10 (big), divisor 140
+                # Sensor 1: bytes 9-10 (big), divisor 140 → ±0.012 bar
                 (9, 'big', 140) if sensor_id == 1 else None,
-                # Sensor 2: bytes 8-9 (little), divisor 150  
-                (8, 'little', 150) if sensor_id == 2 else None,
+                # Sensor 2: bytes 8-9 (little), divisor 145 → ±0.001 bar  
+                (8, 'little', 145) if sensor_id == 2 else None,
+                # Sensor 3: bytes 8-9 (little), divisor 150 → ±0.108 bar
+                (8, 'little', 150) if sensor_id == 3 else None,
                 # Sensor 4: bytes 11-12 (little), divisor 140
                 (11, 'little', 140) if sensor_id == 4 else None,
             ]
