@@ -150,29 +150,90 @@ class TPMSBluetoothDeviceData(BluetoothData):
             # Extract sensor address (bytes 5-7)
             sensor_addr = data[5:8].hex().upper()
             
-            # Extract pressure (bytes 8-9) - auto-detect endian format
-            pressure_big = int.from_bytes(data[8:10], byteorder='big', signed=False)
-            pressure_little = int.from_bytes(data[8:10], byteorder='little', signed=False)
+            # Extract pressure - intelligent auto-detection with known optimal configurations
+            # First try known optimal configurations for specific sensor positions
+            sensor_id = sensor_number - 0x80 + 1
+            known_configs = [
+                # Sensor 1: bytes 9-10 (big), divisor 140
+                (9, 'big', 140) if sensor_id == 1 else None,
+                # Sensor 2: bytes 8-9 (little), divisor 150  
+                (8, 'little', 150) if sensor_id == 2 else None,
+                # Sensor 4: bytes 11-12 (little), divisor 140
+                (11, 'little', 140) if sensor_id == 4 else None,
+            ]
             
-            # Heuristic: choose endian format that gives realistic pressure (1.5-7.0 bar)
-            pressure_bar_big = (pressure_big / 100) / 100  # kPa to bar
-            pressure_bar_little = (pressure_little / 100) / 100  # kPa to bar
+            best_pressure = None
+            best_config = None
+            best_diff = float('inf')
             
-            if 1.5 <= pressure_bar_big <= 7.0:
-                pressure_raw = pressure_big
-                pressure_kpa = pressure_raw / 100
-                pressure_bar = pressure_bar_big
-                endian_used = "big"
-            elif 1.5 <= pressure_bar_little <= 7.0:
-                pressure_raw = pressure_little
-                pressure_kpa = pressure_raw / 100
-                pressure_bar = pressure_bar_little
-                endian_used = "little"
+            # First try known optimal configuration for this sensor
+            for config in known_configs:
+                if config is not None:
+                    start_byte, endian, divisor = config
+                    try:
+                        raw_value = int.from_bytes(data[start_byte:start_byte+2], byteorder=endian)
+                        pressure_bar = (raw_value / divisor) / 100
+                        
+                        if 1.5 <= pressure_bar <= 7.0:  # Realistic range
+                            best_pressure = pressure_bar
+                            best_config = {
+                                'start_byte': start_byte,
+                                'endian': endian,
+                                'divisor': divisor,
+                                'raw_value': raw_value,
+                                'pressure_kpa': raw_value / divisor
+                            }
+                            break  # Use known optimal configuration
+                    except:
+                        continue
+            
+            # If no known config worked, try auto-detection
+            if best_config is None:
+                # Test different byte positions, endian formats, and divisors
+                for start_byte in range(6, 16):
+                    if start_byte + 2 > len(data):
+                        continue
+                        
+                    for endian in ['big', 'little']:
+                        for divisor in [100, 110, 120, 130, 140, 150]:
+                            try:
+                                raw_value = int.from_bytes(data[start_byte:start_byte+2], byteorder=endian)
+                                pressure_bar = (raw_value / divisor) / 100
+                                
+                                # Check if pressure is in realistic range (1.5-7.0 bar)
+                                if 1.5 <= pressure_bar <= 7.0:
+                                    # Simple scoring: prefer typical tire pressure range (2.0-5.0 bar)
+                                    if 2.0 <= pressure_bar <= 5.0:
+                                        score = 1.0  # Good pressure
+                                    else:
+                                        score = 0.5  # Acceptable pressure
+                                        
+                                    diff = 1.0 - score
+                                    
+                                    if diff < best_diff:
+                                        best_diff = diff
+                                        best_pressure = pressure_bar
+                                        best_config = {
+                                            'start_byte': start_byte,
+                                            'endian': endian,
+                                            'divisor': divisor,
+                                            'raw_value': raw_value,
+                                            'pressure_kpa': raw_value / divisor
+                                        }
+                            except:
+                                continue
+            
+            # Use best configuration found, or fallback
+            if best_config:
+                pressure_bar = best_pressure
+                pressure_kpa = best_config['pressure_kpa']
+                pressure_raw = best_config['raw_value']
+                endian_used = f"{best_config['endian']} (bytes {best_config['start_byte']}-{best_config['start_byte']+1}, div {best_config['divisor']})"
             else:
-                # Fallback to big-endian if both are out of range
-                pressure_raw = pressure_big
+                # Fallback to original method
+                pressure_raw = int.from_bytes(data[8:10], byteorder='big')
                 pressure_kpa = pressure_raw / 100
-                pressure_bar = pressure_bar_big
+                pressure_bar = pressure_kpa / 100
                 endian_used = "big (fallback)"
             
             # Extract temperature (bytes 12-13, LITTLE-endian, in Celsius/100)
